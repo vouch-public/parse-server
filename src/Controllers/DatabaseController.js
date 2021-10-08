@@ -1704,30 +1704,30 @@ class DatabaseController {
       throw error;
     });
 
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive username index: ', error);
-        throw error;
-      });
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive username index: ', error);
-        throw error;
-      });
+//     await this.adapter
+//       .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
+//       .catch(error => {
+//         logger.warn('Unable to create case insensitive username index: ', error);
+//         throw error;
+//       });
+//     await this.adapter
+//       .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
+//       .catch(error => {
+//         logger.warn('Unable to create case insensitive username index: ', error);
+//         throw error;
+//       });
 
     await this.adapter.ensureUniqueness('_User', requiredUserFields, ['email']).catch(error => {
       logger.warn('Unable to ensure uniqueness for user email addresses: ', error);
       throw error;
     });
 
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['email'], 'case_insensitive_email', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive email index: ', error);
-        throw error;
-      });
+//     await this.adapter
+//       .ensureIndex('_User', requiredUserFields, ['email'], 'case_insensitive_email', true)
+//       .catch(error => {
+//         logger.warn('Unable to create case insensitive email index: ', error);
+//         throw error;
+//       });
 
     await this.adapter.ensureUniqueness('_Role', requiredRoleFields, ['name']).catch(error => {
       logger.warn('Unable to ensure uniqueness for role name: ', error);
