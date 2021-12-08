@@ -225,6 +225,16 @@ export function getDatabaseAdapter(databaseURI, collectionPrefix, databaseOption
   } catch (e) {
     /* */
   }
+
+  const MONGOOSE_OPTIONS_STRING = process.env.MONGOOSE_OPTIONS || '{}';
+  let MONGOOSE_OPTIONS = {};
+
+  try {
+    MONGOOSE_OPTIONS = JSON.parse(MONGOOSE_OPTIONS_STRING);
+  } catch (error) {
+    console.log('failed to parse mongoose options', error, process.env.MONGOOSE_OPTIONS);
+  }
+
   switch (protocol) {
     case 'postgres:':
       return new PostgresStorageAdapter({
@@ -236,7 +246,7 @@ export function getDatabaseAdapter(databaseURI, collectionPrefix, databaseOption
       return new MongoStorageAdapter({
         uri: databaseURI,
         collectionPrefix,
-        mongoOptions: databaseOptions,
+        mongoOptions: { ...databaseOptions, ...MONGOOSE_OPTIONS },
       });
   }
 }
