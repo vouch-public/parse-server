@@ -349,6 +349,7 @@ class ParseServer {
           const json = response.data || null;
           if (response.status !== 200 || !json || (json && json.status !== 'ok')) {
             /* eslint-disable no-console */
+            console.log('>>', response)
             console.warn(
               `\nWARNING, Unable to connect to '${Parse.serverURL}'.` +
                 ` Cloud code and push notifications may be unavailable!\n`
