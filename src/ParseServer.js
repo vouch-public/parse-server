@@ -343,7 +343,11 @@ class ParseServer {
     // perform a health check on the serverURL value
     if (Parse.serverURL) {
       const request = require('./request');
-      request({ url: Parse.serverURL.replace(/\/$/, '') + '/health' })
+      request({ 
+        url: Parse.serverURL.replace(/\/$/, '') + '/health',
+        insecure: true,
+        rejectUnauthorized: false
+      })
         .catch(response => response)
         .then(response => {
           const json = response.data || null;
