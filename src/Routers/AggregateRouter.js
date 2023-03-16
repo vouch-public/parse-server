@@ -82,31 +82,39 @@ export class AggregateRouter extends ClassesRouter {
 
     return pipeline.map(stage => {
       const keys = Object.keys(stage);
-      if (keys.length != 1) {
-        throw new Error(`Pipeline stages should only have one key found ${keys.join(', ')}`);
+      if (keys.length !== 1) {
+        throw new Parse.Error(
+          Parse.Error.INVALID_QUERY,
+          `Pipeline stages should only have one key but found ${keys.join(', ')}.`
+        );
       }
       return AggregateRouter.transformStage(keys[0], stage);
     });
   }
 
   static transformStage(stageName, stage) {
-    if (stageName === 'group') {
-      if (Object.prototype.hasOwnProperty.call(stage[stageName], '_id')) {
-        throw new Parse.Error(
-          Parse.Error.INVALID_QUERY,
-          `Invalid parameter for query: group. Please use objectId instead of _id`
-        );
-      }
-      if (!Object.prototype.hasOwnProperty.call(stage[stageName], 'objectId')) {
-        throw new Parse.Error(
-          Parse.Error.INVALID_QUERY,
-          `Invalid parameter for query: group. objectId is required`
-        );
-      }
-      stage[stageName]._id = stage[stageName].objectId;
-      delete stage[stageName].objectId;
+    const skipKeys = ['distinct', 'where'];
+    if (skipKeys.includes(stageName)) {
+      return;
     }
-    return { [`$${stageName}`]: stage[stageName] };
+    if (stageName[0] !== '$') {
+      throw new Parse.Error(Parse.Error.INVALID_QUERY, `Invalid aggregate stage '${stageName}'.`);
+    }
+    if (stageName === '$group') {
+      if (Object.prototype.hasOwnProperty.call(stage[stageName], 'objectId')) {
+        throw new Parse.Error(
+          Parse.Error.INVALID_QUERY,
+          `Cannot use 'objectId' in aggregation stage $group.`
+        );
+      }
+      if (!Object.prototype.hasOwnProperty.call(stage[stageName], '_id')) {
+        throw new Parse.Error(
+          Parse.Error.INVALID_QUERY,
+          `Invalid parameter for query: group. Missing key _id`
+        );
+      }
+    }
+    return { [stageName]: stage[stageName] };
   }
 
   mountRoutes() {

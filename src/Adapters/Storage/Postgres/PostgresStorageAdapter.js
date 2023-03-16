@@ -7,12 +7,14 @@ import _ from 'lodash';
 // @flow-disable-next
 import { v4 as uuidv4 } from 'uuid';
 import sql from './sql';
+import { StorageAdapter } from '../StorageAdapter';
+import type { SchemaType, QueryType, QueryOptions } from '../StorageAdapter';
+const Utils = require('../../../Utils');
 
 const PostgresRelationDoesNotExistError = '42P01';
 const PostgresDuplicateRelationError = '42P07';
 const PostgresDuplicateColumnError = '42701';
 const PostgresMissingColumnError = '42703';
-const PostgresDuplicateObjectError = '42710';
 const PostgresUniqueIndexViolationError = '23505';
 const logger = require('../../../logger');
 
@@ -21,9 +23,6 @@ const debug = function (...args: any) {
   const log = logger.getLogger();
   log.debug.apply(log, args);
 };
-
-import { StorageAdapter } from '../StorageAdapter';
-import type { SchemaType, QueryType, QueryOptions } from '../StorageAdapter';
 
 const parseTypeToPostgresType = type => {
   switch (type.type) {
@@ -90,6 +89,22 @@ const toPostgresValue = value => {
     }
   }
   return value;
+};
+
+const toPostgresValueCastType = value => {
+  const postgresValue = toPostgresValue(value);
+  let castType;
+  switch (typeof postgresValue) {
+    case 'number':
+      castType = 'double precision';
+      break;
+    case 'boolean':
+      castType = 'boolean';
+      break;
+    default:
+      castType = undefined;
+  }
+  return castType;
 };
 
 const transformValue = value => {
@@ -274,7 +289,6 @@ const buildWhereClause = ({ schema, query, index, caseInsensitive }): WhereClaus
         continue;
       }
     }
-
     const authDataMatch = fieldName.match(/^_auth_data_([a-zA-Z0-9_]+)$/);
     if (authDataMatch) {
       // TODO: Handle querying by _auth_data_provider, authData is stored in authData field
@@ -370,9 +384,17 @@ const buildWhereClause = ({ schema, query, index, caseInsensitive }): WhereClaus
             );
           } else {
             if (fieldName.indexOf('.') >= 0) {
-              const constraintFieldName = transformDotField(fieldName);
+              const castType = toPostgresValueCastType(fieldValue.$ne);
+              const constraintFieldName = castType
+                ? `CAST ((${transformDotField(fieldName)}) AS ${castType})`
+                : transformDotField(fieldName);
               patterns.push(
-                `(${constraintFieldName} <> $${index} OR ${constraintFieldName} IS NULL)`
+                `(${constraintFieldName} <> $${index + 1} OR ${constraintFieldName} IS NULL)`
+              );
+            } else if (typeof fieldValue.$ne === 'object' && fieldValue.$ne.$relativeTime) {
+              throw new Parse.Error(
+                Parse.Error.INVALID_JSON,
+                '$relativeTime can only be used with the $lt, $lte, $gt, and $gte operators'
               );
             } else {
               patterns.push(`($${index}:name <> $${index + 1} OR $${index}:name IS NULL)`);
@@ -397,8 +419,17 @@ const buildWhereClause = ({ schema, query, index, caseInsensitive }): WhereClaus
         index += 1;
       } else {
         if (fieldName.indexOf('.') >= 0) {
+          const castType = toPostgresValueCastType(fieldValue.$eq);
+          const constraintFieldName = castType
+            ? `CAST ((${transformDotField(fieldName)}) AS ${castType})`
+            : transformDotField(fieldName);
           values.push(fieldValue.$eq);
-          patterns.push(`${transformDotField(fieldName)} = $${index++}`);
+          patterns.push(`${constraintFieldName} = $${index++}`);
+        } else if (typeof fieldValue.$eq === 'object' && fieldValue.$eq.$relativeTime) {
+          throw new Parse.Error(
+            Parse.Error.INVALID_JSON,
+            '$relativeTime can only be used with the $lt, $lte, $gt, and $gte operators'
+          );
         } else {
           values.push(fieldName, fieldValue.$eq);
           patterns.push(`$${index}:name = $${index + 1}`);
@@ -513,7 +544,12 @@ const buildWhereClause = ({ schema, query, index, caseInsensitive }): WhereClaus
     }
 
     if (typeof fieldValue.$exists !== 'undefined') {
-      if (fieldValue.$exists) {
+      if (typeof fieldValue.$exists === 'object' && fieldValue.$exists.$relativeTime) {
+        throw new Parse.Error(
+          Parse.Error.INVALID_JSON,
+          '$relativeTime can only be used with the $lt, $lte, $gt, and $gte operators'
+        );
+      } else if (fieldValue.$exists) {
         patterns.push(`$${index}:name IS NOT NULL`);
       } else {
         patterns.push(`$${index}:name IS NULL`);
@@ -757,24 +793,33 @@ const buildWhereClause = ({ schema, query, index, caseInsensitive }): WhereClaus
     Object.keys(ParseToPosgresComparator).forEach(cmp => {
       if (fieldValue[cmp] || fieldValue[cmp] === 0) {
         const pgComparator = ParseToPosgresComparator[cmp];
-        const postgresValue = toPostgresValue(fieldValue[cmp]);
         let constraintFieldName;
+        let postgresValue = toPostgresValue(fieldValue[cmp]);
+
         if (fieldName.indexOf('.') >= 0) {
-          let castType;
-          switch (typeof postgresValue) {
-            case 'number':
-              castType = 'double precision';
-              break;
-            case 'boolean':
-              castType = 'boolean';
-              break;
-            default:
-              castType = undefined;
-          }
+          const castType = toPostgresValueCastType(fieldValue[cmp]);
           constraintFieldName = castType
             ? `CAST ((${transformDotField(fieldName)}) AS ${castType})`
             : transformDotField(fieldName);
         } else {
+          if (typeof postgresValue === 'object' && postgresValue.$relativeTime) {
+            if (schema.fields[fieldName].type !== 'Date') {
+              throw new Parse.Error(
+                Parse.Error.INVALID_JSON,
+                '$relativeTime can only be used with Date field'
+              );
+            }
+            const parserResult = Utils.relativeTimeToDate(postgresValue.$relativeTime);
+            if (parserResult.status === 'success') {
+              postgresValue = toPostgresValue(parserResult.result);
+            } else {
+              console.error('Error while parsing relative date', parserResult);
+              throw new Parse.Error(
+                Parse.Error.INVALID_JSON,
+                `bad $relativeTime (${postgresValue.$relativeTime}) value. ${parserResult.info}`
+              );
+            }
+          }
           constraintFieldName = `$${index++}:name`;
           values.push(fieldName);
         }
@@ -873,15 +918,7 @@ export class PostgresStorageAdapter implements StorageAdapter {
         'CREATE TABLE IF NOT EXISTS "_SCHEMA" ( "className" varChar(120), "schema" jsonb, "isParseClass" bool, PRIMARY KEY ("className") )'
       )
       .catch(error => {
-        if (
-          error.code === PostgresDuplicateRelationError ||
-          error.code === PostgresUniqueIndexViolationError ||
-          error.code === PostgresDuplicateObjectError
-        ) {
-          // Table already exists, must have been created by a different request. Ignore error.
-        } else {
-          throw error;
-        }
+        throw error;
       });
   }
 
@@ -1119,6 +1156,16 @@ export class PostgresStorageAdapter implements StorageAdapter {
     this._notifySchemaChange();
   }
 
+  async updateFieldOptions(className: string, fieldName: string, type: any) {
+    await this._client.tx('update-schema-field-options', async t => {
+      const path = `{fields,${fieldName}}`;
+      await t.none(
+        'UPDATE "_SCHEMA" SET "schema"=jsonb_set("schema", $<path>, $<type>)  WHERE "className"=$<className>',
+        { path, type, className }
+      );
+    });
+  }
+
   // Drops a collection. Resolves with true if it was a Parse Schema (eg. _User, Custom, etc.)
   // and resolves with false if it wasn't (eg. a join table). Rejects if deletion was impossible.
   async deleteClass(className: string) {
@@ -1274,12 +1321,17 @@ export class PostgresStorageAdapter implements StorageAdapter {
         return;
       }
       var authDataMatch = fieldName.match(/^_auth_data_([a-zA-Z0-9_]+)$/);
+      const authDataAlreadyExists = !!object.authData;
       if (authDataMatch) {
         var provider = authDataMatch[1];
         object['authData'] = object['authData'] || {};
         object['authData'][provider] = object[fieldName];
         delete object[fieldName];
         fieldName = 'authData';
+        // Avoid adding authData multiple times to the query
+        if (authDataAlreadyExists) {
+          return;
+        }
       }
 
       columnsArray.push(fieldName);
@@ -1759,7 +1811,6 @@ export class PostgresStorageAdapter implements StorageAdapter {
       caseInsensitive,
     });
     values.push(...where.values);
-
     const wherePattern = where.pattern.length > 0 ? `WHERE ${where.pattern}` : '';
     const limitPattern = hasLimit ? `LIMIT $${values.length + 1}` : '';
     if (hasLimit) {
@@ -1797,7 +1848,13 @@ export class PostgresStorageAdapter implements StorageAdapter {
         if (key === 'ACL') {
           memo.push('_rperm');
           memo.push('_wperm');
-        } else if (key.length > 0) {
+        } else if (
+          key.length > 0 &&
+          // Remove selected field not referenced in the schema
+          // Relation is not a column in postgres
+          // $score is a Parse special field and is also not a column
+          ((schema.fields[key] && schema.fields[key].type !== 'Relation') || key === '$score')
+        ) {
           memo.push(key);
         }
         return memo;
@@ -1983,10 +2040,10 @@ export class PostgresStorageAdapter implements StorageAdapter {
 
     return this._client
       .one(qs, values, a => {
-        if (a.approximate_row_count != null) {
-          return +a.approximate_row_count;
+        if (a.approximate_row_count == null || a.approximate_row_count == -1) {
+          return !isNaN(+a.count) ? +a.count : 0;
         } else {
-          return +a.count;
+          return +a.approximate_row_count;
         }
       })
       .catch(error => {
@@ -2111,7 +2168,7 @@ export class PostgresStorageAdapter implements StorageAdapter {
                   columns.push(
                     `EXTRACT(${
                       mongoAggregateToPostgres[operation]
-                    } FROM $${index}:name AT TIME ZONE 'UTC') AS $${index + 1}:name`
+                    } FROM $${index}:name AT TIME ZONE 'UTC')::integer AS $${index + 1}:name`
                   );
                   values.push(source, alias);
                   index += 2;
@@ -2184,8 +2241,11 @@ export class PostgresStorageAdapter implements StorageAdapter {
           });
           stage.$match = collapse;
         }
-        for (const field in stage.$match) {
+        for (let field in stage.$match) {
           const value = stage.$match[field];
+          if (field === '_id') {
+            field = 'objectId';
+          }
           const matchPatterns = [];
           Object.keys(ParseToPosgresComparator).forEach(cmp => {
             if (value[cmp]) {
@@ -2400,6 +2460,11 @@ export class PostgresStorageAdapter implements StorageAdapter {
       ? fieldNames.map((fieldName, index) => `lower($${index + 3}:name) varchar_pattern_ops`)
       : fieldNames.map((fieldName, index) => `$${index + 3}:name`);
     const qs = `CREATE INDEX IF NOT EXISTS $1:name ON $2:name (${constraintPatterns.join()})`;
+    const setIdempotencyFunction =
+      options.setIdempotencyFunction !== undefined ? options.setIdempotencyFunction : false;
+    if (setIdempotencyFunction) {
+      await this.ensureIdempotencyFunctionExists(options);
+    }
     await conn.none(qs, [indexNameOptions.name, className, ...fieldNames]).catch(error => {
       if (
         error.code === PostgresDuplicateRelationError &&
@@ -2418,6 +2483,24 @@ export class PostgresStorageAdapter implements StorageAdapter {
       } else {
         throw error;
       }
+    });
+  }
+
+  async deleteIdempotencyFunction(options?: Object = {}): Promise<any> {
+    const conn = options.conn !== undefined ? options.conn : this._client;
+    const qs = 'DROP FUNCTION IF EXISTS idempotency_delete_expired_records()';
+    return conn.none(qs).catch(error => {
+      throw error;
+    });
+  }
+
+  async ensureIdempotencyFunctionExists(options?: Object = {}): Promise<any> {
+    const conn = options.conn !== undefined ? options.conn : this._client;
+    const ttlOptions = options.ttl !== undefined ? `${options.ttl} seconds` : '60 seconds';
+    const qs =
+      'CREATE OR REPLACE FUNCTION idempotency_delete_expired_records() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM "_Idempotency" WHERE expire < NOW() - INTERVAL $1; END; $$;';
+    return conn.none(qs, [ttlOptions]).catch(error => {
+      throw error;
     });
   }
 }
