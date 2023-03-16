@@ -358,6 +358,17 @@ const relationSchema = {
   fields: { relatedId: { type: 'String' }, owningId: { type: 'String' } },
 };
 
+const maybeTransformUsernameAndEmailToLowerCase = (object, className, options) => {
+  if (className === '_User' && options.forceEmailAndUsernameToLowerCase) {
+    const toLowerCaseFields = ['email', 'username'];
+    toLowerCaseFields.forEach(key => {
+      if (typeof object[key] === 'string') {
+        object[key] = object[key].toLowerCase();
+      }
+    });
+  }
+};
+
 class DatabaseController {
   adapter: StorageAdapter;
   schemaCache: any;
@@ -557,6 +568,7 @@ class DatabaseController {
                 }
               }
               update = transformObjectACL(update);
+              maybeTransformUsernameAndEmailToLowerCase(update, className, this.options);
               transformAuthData(className, update, schema);
               if (validateOnly) {
                 return this.adapter.find(className, schema, query, {}).then(result => {
@@ -800,7 +812,7 @@ class DatabaseController {
     // Make a copy of the object, so we don't mutate the incoming data.
     const originalObject = object;
     object = transformObjectACL(object);
-
+    maybeTransformUsernameAndEmailToLowerCase(object, className, this.options);
     object.createdAt = { iso: object.createdAt, __type: 'Date' };
     object.updatedAt = { iso: object.updatedAt, __type: 'Date' };
 
@@ -1193,7 +1205,7 @@ class DatabaseController {
             keys,
             readPreference,
             hint,
-            caseInsensitive,
+            caseInsensitive: this.options.disableCaseInsensitivity ? false : caseInsensitive,
             explain,
           };
           Object.keys(sort).forEach(fieldName => {
@@ -1696,30 +1708,26 @@ class DatabaseController {
       throw error;
     });
 
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive username index: ', error);
-        throw error;
-      });
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive username index: ', error);
-        throw error;
-      });
+    if (!this.options.disableCaseInsensitivity) {
+      await this.adapter
+        .ensureIndex('_User', requiredUserFields, ['username'], 'case_insensitive_username', true)
+        .catch(error => {
+          logger.warn('Unable to create case insensitive username index: ', error);
+          throw error;
+        });
+
+      await this.adapter
+        .ensureIndex('_User', requiredUserFields, ['email'], 'case_insensitive_email', true)
+        .catch(error => {
+          logger.warn('Unable to create case insensitive email index: ', error);
+          throw error;
+        });
+    }
 
     await this.adapter.ensureUniqueness('_User', requiredUserFields, ['email']).catch(error => {
       logger.warn('Unable to ensure uniqueness for user email addresses: ', error);
       throw error;
     });
-
-    await this.adapter
-      .ensureIndex('_User', requiredUserFields, ['email'], 'case_insensitive_email', true)
-      .catch(error => {
-        logger.warn('Unable to create case insensitive email index: ', error);
-        throw error;
-      });
 
     await this.adapter.ensureUniqueness('_Role', requiredRoleFields, ['name']).catch(error => {
       logger.warn('Unable to ensure uniqueness for role name: ', error);
