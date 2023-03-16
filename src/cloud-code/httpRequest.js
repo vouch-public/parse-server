@@ -111,7 +111,6 @@ module.exports = function httpRequest(options) {
     headers: options.headers,
     encoding: null,
     followRedirects: options.followRedirects === true,
-    rejectUnauthorized: false
   };
   if (requestOptions.headers) {
     Object.keys(requestOptions.headers).forEach(key => {

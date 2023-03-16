@@ -313,6 +313,16 @@ describe('matchesQuery', function () {
     expect(matchesQuery(player, orQuery)).toBe(true);
   });
 
+  it('does not match $all query when value is missing', () => {
+    const player = {
+      id: new Id('Player', 'P1'),
+      name: 'Player 1',
+      score: 12,
+    };
+    const q = { missing: { $all: [1, 2, 3] } };
+    expect(matchesQuery(player, q)).toBe(false);
+  });
+
   it('matches an $and query', () => {
     const player = {
       id: new Id('Player', 'P1'),
@@ -570,6 +580,29 @@ describe('matchesQuery', function () {
       Parse.Object.fromJSON({ className: 'Profile', objectId: 'ghi' }),
       Parse.Object.fromJSON({ className: 'Profile', objectId: 'def' }),
     ]);
+    expect(matchesQuery(message, q)).toBe(false);
+  });
+
+  it('should support containedIn with array of pointers', () => {
+    const message = {
+      id: new Id('Message', 'O2'),
+      profiles: [pointer('Profile', 'yeahaw'), pointer('Profile', 'yes')],
+    };
+
+    let q = new Parse.Query('Message');
+    q.containedIn('profiles', [
+      Parse.Object.fromJSON({ className: 'Profile', objectId: 'no' }),
+      Parse.Object.fromJSON({ className: 'Profile', objectId: 'yes' }),
+    ]);
+
+    expect(matchesQuery(message, q)).toBe(true);
+
+    q = new Parse.Query('Message');
+    q.containedIn('profiles', [
+      Parse.Object.fromJSON({ className: 'Profile', objectId: 'no' }),
+      Parse.Object.fromJSON({ className: 'Profile', objectId: 'nope' }),
+    ]);
+
     expect(matchesQuery(message, q)).toBe(false);
   });
 
